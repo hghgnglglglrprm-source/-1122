@@ -167,9 +167,11 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for r in rows:
         text += f"• {r[0]} — {r[1]:,.2f} ₽ ({r[2]})\n"
     await update.message.reply_text(text, parse_mode='Markdown')
-
 async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    if user.id != ADMIN_ID:7845037971
+        await update.message.reply_text("❌ У тебя нет доступа к этой команде")
+        return
     if not context.args:
         await update.message.reply_text("❌ Укажи сумму: /deposit 1000")
         return
