@@ -28,15 +28,15 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
+        first_name TEXT,
         balance REAL DEFAULT 0,
         account_number TEXT,
-        daily_limit REAL DEFAULT 100000,
-        limit_enabled INTEGER DEFAULT 1
+        registered INTEGER DEFAULT 0,
+        reg_date TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS admins (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
-        added_by INTEGER,
         added_date TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS history (
@@ -79,15 +79,15 @@ def is_admin(user_id):
     conn.close()
     return row is not None
 
-def get_user(user_id, username=""):
+def get_user(user_id, username="", first_name=""):
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
     c.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
     user = c.fetchone()
     if not user:
         account = f"CR{user_id}"[-10:]
-        c.execute('INSERT INTO users (user_id, username, balance, account_number) VALUES (?, ?, ?, ?)',
-                  (user_id, username, 0, account))
+        c.execute('INSERT INTO users (user_id, username, first_name, balance, account_number, registered) VALUES (?, ?, ?, ?, ?, ?)',
+                  (user_id, username, first_name, 0, account, 0))
         conn.commit()
         c.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
         user = c.fetchone()
@@ -132,7 +132,7 @@ def get_crypto_rates():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    get_user(user.id, user.username or user.first_name)
+    get_user(user.id, user.username or "", user.first_name or "")
     await update.message.reply_text(
         f"🏦 Добро пожаловать в *CryptoBank*, {user.first_name}!\n\n"
         "💳 *Основные:*\n"
@@ -140,9 +140,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /details — реквизиты\n"
         "• /history — история\n\n"
         "📤 *Операции:*\n"
-        "• /deposit <сумма>\n"
-        "• /withdraw <сумма>\n"
-        "• /send @user <сумма>\n\n"
+        "• /withdraw <сумма> — снять\n"
+        "• /send @user <сумма> — перевод\n\n"
         "🏦 *Продукты:*\n"
         "• /savings — вклад 5%/год\n"
         "• /loan — кредит 15%/год\n"
@@ -152,36 +151,61 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /wallet — кошелёк\n"
         "• /buy BTC 10000\n"
         "• /sell ETH 0.5\n\n"
-        "🏆 *Рейтинг:*\n"
-        "• /top — топ богачей",
+        "🏆 /top — топ богачей\n\n"
+        "📋 /register — получить официальный статус",
+        parse_mode='Markdown'
+    )
+
+async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
+    conn = sqlite3.connect('bank.db')
+    c = conn.cursor()
+    c.execute('SELECT registered FROM users WHERE user_id = ?', (user.id,))
+    row = c.fetchone()
+    if row and row[0] == 1:
+        await update.message.reply_text("✅ Ты уже зарегистрирован в банке!")
+        conn.close()
+        return
+    c.execute('UPDATE users SET registered = 1, reg_date = ? WHERE user_id = ?',
+              (datetime.now().strftime('%d.%m.%Y'), user.id))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text(
+        f"✅ *Официальный счёт открыт!*\n\n"
+        f"👤 Имя: {user.first_name}\n"
+        f"📅 Дата: {datetime.now().strftime('%d.%m.%Y')}\n\n"
+        f"Теперь ты официальный клиент CryptoBank 🏦",
         parse_mode='Markdown'
     )
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    get_user(user.id, user.username)
+    get_user(user.id, user.username or "", user.first_name or "")
     bal = get_balance(user.id)
     bal_str = "∞" if bal == float('inf') else f"{bal:,.2f} ₽"
     await update.message.reply_text(f"💳 Баланс: *{bal_str}*", parse_mode='Markdown')
 
 async def details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    u = get_user(user.id, user.username)
+    u = get_user(user.id, user.username or "", user.first_name or "")
     bal = get_balance(user.id)
     bal_str = "∞" if bal == float('inf') else f"{bal:,.2f} ₽"
     role = "👑 Владелец" if is_owner(user.id) else ("🛡 Администратор" if is_admin(user.id) else "👤 Пользователь")
+    reg_status = "✅ Зарегистрирован" if u[5] == 1 else "❌ Не зарегистрирован"
     await update.message.reply_text(
         f"📋 *Реквизиты*\n\n"
         f"👤 Имя: {user.first_name}\n"
-        f"🔢 Счёт: `{u[3]}`\n"
+        f"🔢 Счёт: `{u[4]}`\n"
         f"💰 Баланс: {bal_str}\n"
         f"🎭 Роль: {role}\n"
-        f"📅 Дата: {datetime.now().strftime('%d.%m.%Y')}",
+        f"📋 Статус: {reg_status}",
         parse_mode='Markdown'
     )
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
     c.execute('SELECT action, amount, date FROM history WHERE user_id = ? ORDER BY id DESC LIMIT 10', (user.id,))
@@ -195,31 +219,9 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"• {r[0]} — {r[1]:,.2f} ₽ ({r[2]})\n"
     await update.message.reply_text(text, parse_mode='Markdown')
 
-async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not is_admin(user.id):
-        await update.message.reply_text("❌ У тебя нет доступа к этой команде")
-        return
-    if not context.args:
-        await update.message.reply_text("❌ Укажи сумму: /deposit 1000")
-        return
-    try:
-        amount = float(context.args[0])
-        if amount <= 0:
-            raise ValueError
-    except:
-        await update.message.reply_text("❌ Неверная сумма")
-        return
-    conn = sqlite3.connect('bank.db')
-    c = conn.cursor()
-    c.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', (amount, user.id))
-    conn.commit()
-    conn.close()
-    add_history(user.id, "Пополнение", amount)
-    await update.message.reply_text(f"✅ Пополнено на *{amount:,.2f} ₽*", parse_mode='Markdown')
-
 async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     if not context.args:
         await update.message.reply_text("❌ Укажи сумму: /withdraw 1000")
         return
@@ -245,6 +247,7 @@ async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     if len(context.args) < 2:
         await update.message.reply_text("❌ Формат: /send @user 1000")
         return
@@ -266,7 +269,7 @@ async def send(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = c.fetchone()
     if not target:
         conn.close()
-        await update.message.reply_text("❌ Пользователь не найден. Он должен запустить бота.")
+        await update.message.reply_text("❌ Пользователь не найден. Он должен написать боту /start.")
         return
     if not is_owner(user.id):
         c.execute('UPDATE users SET balance = balance - ? WHERE user_id = ?', (amount, user.id))
@@ -279,6 +282,7 @@ async def send(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def savings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
     c.execute('SELECT balance, created_date FROM savings WHERE user_id = ?', (user.id,))
@@ -300,7 +304,8 @@ async def savings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if row:
             c.execute('UPDATE savings SET balance = balance + ? WHERE user_id = ?', (amount, user.id))
         else:
-            c.execute('INSERT INTO savings VALUES (?, ?, ?)', (user.id, amount, datetime.now().strftime('%d.%m.%Y')))
+            c.execute('INSERT INTO savings VALUES (?, ?, ?)',
+                      (user.id, amount, datetime.now().strftime('%d.%m.%Y')))
         conn.commit()
         conn.close()
         add_history(user.id, "Вклад — пополнение", amount)
@@ -336,6 +341,7 @@ async def savings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def loan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
     c.execute('SELECT amount, taken_date FROM loans WHERE user_id = ?', (user.id,))
@@ -407,6 +413,7 @@ async def loan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def limits(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
     if context.args and context.args[0] == 'set':
@@ -454,6 +461,7 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
     c.execute('SELECT coin, amount, avg_price FROM wallets WHERE user_id = ?', (user.id,))
@@ -475,6 +483,7 @@ async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     if len(context.args) < 2:
         await update.message.reply_text("❌ Формат: /buy BTC 10000")
         return
@@ -486,7 +495,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     r = get_crypto_rates()
     if coin not in r:
-        await update.message.reply_text("❌ Монета не найдена. Доступно: BTC ETH SOL DOGE")
+        await update.message.reply_text("❌ Доступно: BTC ETH SOL DOGE")
         return
     bal = get_balance(user.id)
     if bal != float('inf') and bal < rub_amount:
@@ -519,6 +528,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    get_user(user.id, user.username or "", user.first_name or "")
     if len(context.args) < 2:
         await update.message.reply_text("❌ Формат: /sell BTC 0.001")
         return
@@ -530,7 +540,7 @@ async def sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     r = get_crypto_rates()
     if coin not in r:
-        await update.message.reply_text("❌ Монета не найдена. Доступно: BTC ETH SOL DOGE")
+        await update.message.reply_text("❌ Доступно: BTC ETH SOL DOGE")
         return
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
@@ -560,7 +570,7 @@ async def sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('bank.db')
     c = conn.cursor()
-    c.execute('SELECT username, balance FROM users ORDER BY balance DESC LIMIT 10')
+    c.execute('SELECT username, first_name, balance FROM users ORDER BY balance DESC LIMIT 10')
     rows = c.fetchall()
     conn.close()
     if not rows:
@@ -568,8 +578,8 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
     text = "🏆 *Топ богачей CryptoBank*\n\n"
-    for i, (username, balance) in enumerate(rows):
-        name = f"@{username}" if username else "Аноним"
+    for i, (username, first_name, balance) in enumerate(rows):
+        name = f"@{username}" if username else first_name or "Аноним"
         text += f"{medals[i]} {name} — {balance:,.2f} ₽\n"
     await update.message.reply_text(text, parse_mode='Markdown')
 
@@ -590,13 +600,15 @@ async def addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = c.fetchone()
     if not target:
         conn.close()
-        await update.message.reply_text("❌ Пользователь не найден. Он должен запустить бота.")
+        await update.message.reply_text("❌ Пользователь не найден. Он должен написать /start боту.")
         return
-    c.execute('INSERT OR REPLACE INTO admins VALUES (?, ?, ?, ?)',
-              (target[0], target_username, user.id, datetime.now().strftime('%d.%m.%Y')))
+    c.execute('INSERT OR REPLACE INTO admins VALUES (?, ?, ?)',
+              (target[0], target_username, datetime.now().strftime('%d.%m.%Y')))
+    c.execute('UPDATE users SET registered = 1, reg_date = ? WHERE user_id = ?',
+              (datetime.now().strftime('%d.%m.%Y'), target[0]))
     conn.commit()
     conn.close()
-    await update.message.reply_text(f"✅ @{target_username} назначен администратором!")
+    await update.message.reply_text(f"✅ @{target_username} назначен администратором и зарегистрирован!")
 
 async def removeadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -621,7 +633,7 @@ async def admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = c.fetchall()
     conn.close()
     text = "🛡 *Администрация CryptoBank*\n\n"
-    text += f"👑 Владелец: @{(await context.bot.get_chat(OWNER_ID)).username}\n\n"
+    text += f"👑 Владелец: ID `{OWNER_ID}`\n\n"
     if rows:
         text += "🛡 *Администраторы:*\n"
         for username, date in rows:
@@ -658,10 +670,10 @@ while True:
     try:
         bot = ApplicationBuilder().token(TOKEN).build()
         bot.add_handler(CommandHandler("start", start))
+        bot.add_handler(CommandHandler("register", register))
         bot.add_handler(CommandHandler("balance", balance))
         bot.add_handler(CommandHandler("details", details))
         bot.add_handler(CommandHandler("history", history))
-        bot.add_handler(CommandHandler("deposit", deposit))
         bot.add_handler(CommandHandler("withdraw", withdraw))
         bot.add_handler(CommandHandler("send", send))
         bot.add_handler(CommandHandler("savings", savings))
