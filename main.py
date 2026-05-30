@@ -19,7 +19,7 @@ def home():
 Thread(target=lambda: flask_app.run(host='0.0.0.0', port=8080)).start()
 
 # ===== НАСТРОЙКИ =====
-TOKEN = "ВСТАВЬ_СВОЙ_TOKEN"
+TOKEN = "8757614437:AAFwaeJa8LNgBLeOKlMElDR3D4quo8Ri_04"
 OWNER_ID = 7845037971
 
 # ===== БАЗА ДАННЫХ =====
