@@ -1,10 +1,9 @@
-
 import sqlite3
 from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.environ.get("MARKET_TOKEN", "TOKEN = "8794841327:AAGw31krYI2eoTdTrfzJw-Sh3VKGIM-9tS0"")
+TOKEN = os.environ.get("MARKET_TOKEN", "8794841327:AAGbjVX33nZpYsHOJQ12xYr9gB0c6FHjLmc")
 BANK_DB = "bank.db"
 MARKET_DB = "market.db"
 
